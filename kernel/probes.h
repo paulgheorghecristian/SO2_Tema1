@@ -1,12 +1,12 @@
 #ifndef PROBES_H
 #define PROBES_H
 
-#include <linux/kprobes.h>
-
-extern struct kretprobe kmalloc_probe;
+#include "commons.h"
 
 struct kmalloc_allocated_size {
 	long size;
 };
+
+void add_to_result(int pid, enum results result, long value);
 
 #endif

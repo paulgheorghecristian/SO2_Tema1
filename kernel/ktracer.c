@@ -12,32 +12,17 @@
 
 #include <linux/string.h>
 #include <linux/miscdevice.h>
-#include <linux/hashtable.h>
 
 #include "../include/tracer.h"
 #include "ktracer.h"
-#include "probes.h"
 
 MODULE_DESCRIPTION("Tema 2");
 MODULE_AUTHOR("Paul Cristian Gheorghe");
 MODULE_LICENSE("GPL");
 
 #define procfs_file_read	"tracer"
-#define HASHTABLE_LOG_SIZE	16
 
 DEFINE_HASHTABLE(procs, HASHTABLE_LOG_SIZE);
-
-void add_to_result(int pid, enum results result, long value) {
-	struct hashtable_entry *current_entry;
-
-	hash_for_each_possible(procs, current_entry, hnode, pid) {
-		if (current_entry->pid != pid) {
-			continue;
-		}
-		atomic64_add(value, &current_entry->results[result]);
-		break;
-	}
-}
 
 void add_node_to_hashtable(int pid){
 	struct hashtable_entry *new_node;
