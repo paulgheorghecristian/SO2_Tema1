@@ -5,7 +5,7 @@
 
 extern struct kretprobe kmalloc_probe;
 
-struct kmalloc_allocated_size{
+struct kmalloc_allocated_size {
 	long size;
 };
 

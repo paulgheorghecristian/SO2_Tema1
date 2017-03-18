@@ -15,6 +15,9 @@
 #include <linux/hashtable.h>
 
 #include "../include/tracer.h"
+#include "ktracer.h"
+#include "probes.h"
+
 MODULE_DESCRIPTION("Tema 2");
 MODULE_AUTHOR("Paul Cristian Gheorghe");
 MODULE_LICENSE("GPL");
@@ -26,13 +29,12 @@ DEFINE_HASHTABLE(procs, HASHTABLE_LOG_SIZE);
 
 void add_to_result(int pid, enum results result, long value) {
 	struct hashtable_entry *current_entry;
-	struct hlist_node *i;
 
-	hash_for_each_possible(procs, current_entry, i, hnode, pid) {
+	hash_for_each_possible(procs, current_entry, hnode, pid) {
 		if (current_entry->pid != pid) {
 			continue;
 		}
-		atomic_add(value, &current_entry->results[result]);
+		atomic64_add(value, &current_entry->results[result]);
 		break;
 	}
 }
@@ -145,6 +147,10 @@ static int tracer_init(void)
 		return -EINVAL;
 	}
 
+	if (register_kretprobe(&kmalloc_probe) < 0) {
+		return -1;
+	}
+
 	return 0;
 }
 
@@ -160,6 +166,8 @@ static void tracer_exit(void)
 	}
 	proc_remove(proc_tracer);
 	misc_deregister(&tracer_device);
+
+	unregister_kretprobe(&kmalloc_probe);
 }
 
 module_init(tracer_init);
