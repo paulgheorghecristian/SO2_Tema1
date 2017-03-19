@@ -33,6 +33,7 @@ void add_node_to_hashtable(int pid){
 	for (i = 0; i < NUM_RESULTS; i++) {
 		atomic64_set(&new_node->results[i], 0);
 	}
+	INIT_LIST_HEAD(&new_node->addr_size_assoc_list_head);
 	hash_add(procs, &new_node->hnode, new_node->pid);
 }
 
@@ -40,8 +41,8 @@ void del_node_from_hashtable(int pid){
 	struct hashtable_entry *current_node;
 	struct hlist_node *i;
 
-	hash_for_each_possible_safe(procs, current_node, i, hnode, pid){
-		if(current_node->pid != pid){
+	hash_for_each_possible_safe(procs, current_node, i, hnode, pid) {
+		if (current_node->pid != pid) {
 			continue;
 		}
 		hash_del(&current_node->hnode);
@@ -67,13 +68,13 @@ static long tracer_ioctl (struct file *file, unsigned int cmd,
 {
 	int ret = 0;
 
-	printk(LOG_LEVEL "Process %d ", *(int*)pid);
+	printk(LOG_LEVEL "Process %ld ", pid);
 	switch (cmd) {
 		case TRACER_ADD_PROCESS:
-			add_node_to_hashtable(*(int*)pid);
+			add_node_to_hashtable(pid);
 			break;
 		case TRACER_REMOVE_PROCESS:
-			del_node_from_hashtable(*(int*)pid);
+			del_node_from_hashtable(pid);
 			break;
 		default:
 			return -ENOTTY;
@@ -100,8 +101,22 @@ static int tracer_proc_show(struct seq_file *m, void *v)
 {
 	struct hashtable_entry *i;
 	int bkt;
+
+	seq_puts(m,"PID  kmalloc kfree kmalloc_mem kfree_mem sched up down lock unlock\n");
 	hash_for_each(procs, bkt, i, hnode){
-		printk("pid=%d\n", i->pid);
+		char buf[100];
+		sprintf(buf,"%d %lld %lld %lld %lld %lld %lld %lld %lld %lld\n",
+			i->pid,
+			atomic64_read(&i->results[KMALLOC_CALLS]),
+			atomic64_read(&i->results[KFREE_CALLS]),
+			atomic64_read(&i->results[KMALLOC_MEM]),
+			atomic64_read(&i->results[KFREE_MEM]),
+			atomic64_read(&i->results[SCHED_CALLS]),
+			atomic64_read(&i->results[UP_CALLS]),
+			atomic64_read(&i->results[DOWN_CALLS]),
+			atomic64_read(&i->results[LOCK_CALLS]),
+			atomic64_read(&i->results[UNLOCK_CALLS]));
+		seq_puts(m, buf);
 	}
 
 	return 0;
@@ -136,6 +151,30 @@ static int tracer_init(void)
 		return -1;
 	}
 
+	if (register_jprobe(&kfree_probe) < 0) {
+		return -1;
+	}
+
+	if (register_jprobe(&schedule_probe) < 0) {
+		return -1;
+	}
+
+	if (register_jprobe(&up_probe) < 0) {
+		return -1;
+	}
+
+	if (register_jprobe(&down_probe) < 0) {
+		return -1;
+	}
+
+	if (register_jprobe(&lock_probe) < 0) {
+		return -1;
+	}
+
+	if (register_jprobe(&unlock_probe) < 0) {
+		return -1;
+	}
+
 	return 0;
 }
 
@@ -153,6 +192,12 @@ static void tracer_exit(void)
 	misc_deregister(&tracer_device);
 
 	unregister_kretprobe(&kmalloc_probe);
+	unregister_jprobe(&kfree_probe);
+	unregister_jprobe(&schedule_probe);
+	unregister_jprobe(&up_probe);
+	unregister_jprobe(&down_probe);
+	unregister_jprobe(&lock_probe);
+	unregister_jprobe(&unlock_probe);
 }
 
 module_init(tracer_init);
