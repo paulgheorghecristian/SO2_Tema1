@@ -7,7 +7,7 @@
 #include <linux/slab.h>
 #define HASHTABLE_LOG_SIZE 16
 
-enum results{
+enum results {
 	KMALLOC_CALLS = 0,
 	KFREE_CALLS,
 	KMALLOC_MEM,
@@ -25,7 +25,7 @@ struct addr_size_assoc_list_node {
 	struct list_head list;
 };
 
-struct hashtable_entry{
+struct hashtable_entry {
 	int pid;
 	atomic64_t results[NUM_RESULTS];
 	struct list_head addr_size_assoc_list_head;

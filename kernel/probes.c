@@ -1,18 +1,20 @@
 #include "probes.h"
 
-void add_to_result(int pid, enum results result, long value) {
-        struct hashtable_entry *current_entry;
+void add_to_result(int pid, enum results result, long value)
+{
+	struct hashtable_entry *current_entry;
 
-        hash_for_each_possible(procs, current_entry, hnode, pid) {
-                if (current_entry->pid != pid) {
-                        continue;
-                }
-                atomic64_add(value, &current_entry->results[result]);
-                break;
-        }
+	hash_for_each_possible(procs, current_entry, hnode, pid) {
+		if (current_entry->pid != pid)
+			continue;
+
+		atomic64_add(value, &current_entry->results[result]);
+		break;
+	}
 }
 
-static int kmalloc_handler(struct kretprobe_instance *ri, struct pt_regs *regs) {
+static int kmalloc_handler(struct kretprobe_instance *ri, struct pt_regs *regs)
+{
 	struct kmalloc_allocated_size *kmalloc_size;
 	long returned_address;
 	struct hashtable_entry *current_node;
@@ -23,19 +25,23 @@ static int kmalloc_handler(struct kretprobe_instance *ri, struct pt_regs *regs) 
 	add_to_result(current->pid, KMALLOC_MEM, kmalloc_size->size);
 
 	hash_for_each_possible(procs, current_node, hnode, current->pid) {
-                if (current_node->pid != current->pid) {
-                        continue;
-                }
+		if (current_node->pid != current->pid)
+			continue;
+
 		new_list_node = kmalloc(sizeof(struct addr_size_assoc_list_node), GFP_ATOMIC);
+		if (new_list_node == NULL)
+			return 0;
+
 		new_list_node->size = kmalloc_size->size;
 		new_list_node->address = returned_address;
 		list_add(&new_list_node->list, &current_node->addr_size_assoc_list_head);
-                break;
-        }
+		break;
+	}
 	return 0;
 }
 
-static int kmalloc_entry_handler(struct kretprobe_instance *ri, struct pt_regs *regs) {
+static int kmalloc_entry_handler(struct kretprobe_instance *ri, struct pt_regs *regs)
+{
 	struct kmalloc_allocated_size *kmalloc_size;
 
 	add_to_result(current->pid, KMALLOC_CALLS, 1);
@@ -46,52 +52,57 @@ static int kmalloc_entry_handler(struct kretprobe_instance *ri, struct pt_regs *
 	return 0;
 }
 
-static void kfree_handler(const void *objp) {
+static void kfree_handler(const void *objp)
+{
 	long arg_address = (long)objp;
 	struct hashtable_entry *current_node;
 	struct addr_size_assoc_list_node *current_list_node;
 
-	add_to_result(current->pid, KFREE_CALLS, 1);
-
 	hash_for_each_possible(procs, current_node, hnode, current->pid) {
-                if (current_node->pid != current->pid) {
-                        continue;
-                }
+		if (current_node->pid != current->pid)
+			continue;
+
 		list_for_each_entry(current_list_node, &current_node->addr_size_assoc_list_head, list) {
 			if (current_list_node->address == arg_address) {
 				add_to_result(current->pid, KFREE_MEM, current_list_node->size);
+				add_to_result(current->pid, KFREE_CALLS, 1);
 				jprobe_return();
 				return;
 			}
 		}
-        }
+	}
 	jprobe_return();
 }
 
-asmlinkage void __sched schedule_handler(void) {
+asmlinkage void __sched schedule_handler(void)
+{
 	add_to_result(current->pid, SCHED_CALLS, 1);
 	jprobe_return();
 }
 
-static void up_handler(struct semaphore *sem) {
+static void up_handler(struct semaphore *sem)
+{
 	add_to_result(current->pid, UP_CALLS, 1);
 	jprobe_return();
 }
 
-static int down_handler(struct semaphore *sem) {
+static int down_handler(struct semaphore *sem)
+{
 	add_to_result(current->pid, DOWN_CALLS, 1);
 	jprobe_return();
 	return 0;
 }
 
-static void __sched lock_handler(struct mutex *m, unsigned int subclass) {
+static void __sched lock_handler(struct mutex *m, unsigned int subclass)
+{
 	add_to_result(current->pid, LOCK_CALLS, 1);
 	jprobe_return();
 }
 
 
 
-static void __sched unlock_handler(struct mutex *m) {
+static void __sched unlock_handler(struct mutex *m)
+{
 	add_to_result(current->pid, UNLOCK_CALLS, 1);
 	jprobe_return();
 }

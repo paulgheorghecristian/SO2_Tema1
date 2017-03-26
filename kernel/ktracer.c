@@ -13,7 +13,7 @@
 #include <linux/string.h>
 #include <linux/miscdevice.h>
 
-#include "../include/tracer.h"
+#include "tracer.h"
 #include "ktracer.h"
 
 MODULE_DESCRIPTION("Tema 2");
@@ -23,27 +23,42 @@ MODULE_LICENSE("GPL");
 #define procfs_file_read	"tracer"
 
 DEFINE_HASHTABLE(procs, HASHTABLE_LOG_SIZE);
+spinlock_t hash_spin;
 
-void add_node_to_hashtable(int pid){
+void add_node_to_hashtable(int pid)
+{
 	struct hashtable_entry *new_node;
 	int i;
 
 	new_node = kmalloc(sizeof(struct hashtable_entry), GFP_KERNEL);
+	if (new_node == NULL)
+		return;
+
 	new_node->pid = pid;
-	for (i = 0; i < NUM_RESULTS; i++) {
+	for (i = 0; i < NUM_RESULTS; i++)
 		atomic64_set(&new_node->results[i], 0);
-	}
+
 	INIT_LIST_HEAD(&new_node->addr_size_assoc_list_head);
+	spin_lock(&hash_spin);
 	hash_add(procs, &new_node->hnode, new_node->pid);
+	spin_unlock(&hash_spin);
 }
 
-void del_node_from_hashtable(int pid){
+void del_node_from_hashtable(int pid)
+{
 	struct hashtable_entry *current_node;
 	struct hlist_node *i;
+	struct list_head *j, *tmp;
+	struct addr_size_assoc_list_node *node;
 
 	hash_for_each_possible_safe(procs, current_node, i, hnode, pid) {
-		if (current_node->pid != pid) {
+		if (current_node->pid != pid)
 			continue;
+
+		list_for_each_safe(j, tmp, &current_node->addr_size_assoc_list_head) {
+			node = list_entry(j, struct addr_size_assoc_list_node, list);
+			list_del(j);
+			kfree(node);
 		}
 		hash_del(&current_node->hnode);
 		kfree(current_node);
@@ -63,21 +78,20 @@ static int tracer_release(struct inode *in, struct file *filp)
 	return 0;
 }
 
-static long tracer_ioctl (struct file *file, unsigned int cmd,
+static long tracer_ioctl(struct file *file, unsigned int cmd,
 	unsigned long pid)
 {
 	int ret = 0;
 
-	printk(LOG_LEVEL "Process %ld ", pid);
 	switch (cmd) {
-		case TRACER_ADD_PROCESS:
-			add_node_to_hashtable(pid);
-			break;
-		case TRACER_REMOVE_PROCESS:
-			del_node_from_hashtable(pid);
-			break;
-		default:
-			return -ENOTTY;
+	case TRACER_ADD_PROCESS:
+		add_node_to_hashtable(pid);
+		break;
+	case TRACER_REMOVE_PROCESS:
+		del_node_from_hashtable(pid);
+		break;
+	default:
+		return -ENOTTY;
 	}
 	return ret;
 }
@@ -102,10 +116,11 @@ static int tracer_proc_show(struct seq_file *m, void *v)
 	struct hashtable_entry *i;
 	int bkt;
 
-	seq_puts(m,"PID  kmalloc kfree kmalloc_mem kfree_mem sched up down lock unlock\n");
-	hash_for_each(procs, bkt, i, hnode){
+	seq_puts(m, "PID  kmalloc kfree kmalloc_mem kfree_mem sched up down lock unlock\n");
+	hash_for_each(procs, bkt, i, hnode) {
 		char buf[100];
-		sprintf(buf,"%d %lld %lld %lld %lld %lld %lld %lld %lld %lld\n",
+
+		sprintf(buf, "%d %lld %lld %lld %lld %lld %lld %lld %lld %lld\n",
 			i->pid,
 			atomic64_read(&i->results[KMALLOC_CALLS]),
 			atomic64_read(&i->results[KFREE_CALLS]),
@@ -139,41 +154,34 @@ static int tracer_init(void)
 	hash_init(procs);
 
 	proc_tracer = proc_create(procfs_file_read, 0000, NULL, &r_fops);
-	if (!proc_tracer) {
+	if (!proc_tracer)
 		return -ENOMEM;
-	}
 
-	if (misc_register(&tracer_device)) {
+	if (misc_register(&tracer_device))
 		return -EINVAL;
-	}
 
-	if (register_kretprobe(&kmalloc_probe) < 0) {
+	if (register_kretprobe(&kmalloc_probe) < 0)
 		return -1;
-	}
 
-	if (register_jprobe(&kfree_probe) < 0) {
+	if (register_jprobe(&kfree_probe) < 0)
 		return -1;
-	}
 
-	if (register_jprobe(&schedule_probe) < 0) {
+	if (register_jprobe(&schedule_probe) < 0)
 		return -1;
-	}
 
-	if (register_jprobe(&up_probe) < 0) {
+	if (register_jprobe(&up_probe) < 0)
 		return -1;
-	}
 
-	if (register_jprobe(&down_probe) < 0) {
+	if (register_jprobe(&down_probe) < 0)
 		return -1;
-	}
 
-	if (register_jprobe(&lock_probe) < 0) {
+	if (register_jprobe(&lock_probe) < 0)
 		return -1;
-	}
 
-	if (register_jprobe(&unlock_probe) < 0) {
+	if (register_jprobe(&unlock_probe) < 0)
 		return -1;
-	}
+
+	spin_lock_init(&hash_spin);
 
 	return 0;
 }
@@ -183,8 +191,15 @@ static void tracer_exit(void)
 	int bkt;
 	struct hashtable_entry *current_node;
 	struct hlist_node *i;
+	struct list_head *j, *tmp;
+	struct addr_size_assoc_list_node *node;
 
-	hash_for_each_safe(procs, bkt, i, current_node, hnode){
+	hash_for_each_safe(procs, bkt, i, current_node, hnode) {
+		list_for_each_safe(j, tmp, &current_node->addr_size_assoc_list_head) {
+			node = list_entry(j, struct addr_size_assoc_list_node, list);
+			list_del(j);
+			kfree(node);
+		}
 		hash_del(&current_node->hnode);
 		kfree(current_node);
 	}
